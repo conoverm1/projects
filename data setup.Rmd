@@ -1,0 +1,174 @@
+---
+title: "Importing and cleaning snapshot data files"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##
+
+Load necessary packages and such
+```{r}
+library(tidyverse)
+library(dplyr)
+library(readxl)
+```
+
+Reading in the "snapshot" data files from Xavier
+
+```{r}
+snap_f20 <- read_excel("Enrollment Snapshot_202009_Census_9-4-20.xlsx", 
+                         sheet = "Sheet2")
+snap_s21 <- read_excel("Enrollment Snapshot_202101_census_2-5-21.xlsx",
+                         sheet = "Enrollment Snapshot")
+snap_f21 <- read_excel("Enrollment Snapshot_202109_Census_09-03-21.xlsx",
+                         sheet = "Enrollment Snapshot")
+snap_s22 <- read_excel("Enrollment Snapshot 202201 Census 01 28 22.xlsx",
+                         sheet = "Enrollment Snapshot")
+snap_f22 <- read_excel("Enrollment Snapshot_202209_CENSUS_09-09-22.xlsx",
+                        sheet = "Enrollment Snapshot")
+snap_s23 <- read_excel("Enrollment Snapshot 202301 CENSUS 1-27-23.xlsx",
+                        sheet = "Enrollment Snapshot")
+snap_f23 <- read_excel("Fall 2022 Cohort 8 JUN 2023.xlsx",
+                        sheet = "Enrollment Snapshot")
+hs_gpa <- read_excel("hsGPA.xlsx")
+```
+
+Wrangle data of our three cohorts into a single data frame and collect the attributes we are interested in studying.
+```{r}
+snap_baby <- bind_rows(
+  snap_f20 %>% 
+    filter(`COHORT TERM` == "202009" & `COHORT CODE`=="NF") %>% 
+    select(`COHORT TERM`,ID,GENDER,`REPORT ETHNICITY`,RELIGION,CITIZENSHIP,`COMMUTER DORM`,`TERM CREDIT HRS`,`TRANSFER HRS`,GPA,`COLLEGE CODE`,`MAJOR CODE 1`,`ATHLETIC CODE`,`HOME STATE`,`HOME ZIP`,`ATRIB USCH DESC`,`HOME COUNTRY`,`CURRENT STREET2`,`CURRENT ZIP`,`INST AID AMT`,`NET REVENUE`),
+  snap_f21 %>% 
+    filter(`COHORT TERM` == "202109" & `COHORT CODE`=="NF") %>% 
+    select(`COHORT TERM`,ID,GENDER,`REPORT ETHNICITY`,RELIGION,CITIZENSHIP,`COMMUTER DORM`,`TERM CREDIT HRS`,`TRANSFER HRS`,GPA,`COLLEGE CODE`,`MAJOR CODE 1`,`ATHLETIC CODE`,`HOME STATE`,`HOME ZIP`,`ATRIB USCH DESC`,`HOME COUNTRY`,`CURRENT STREET2`,`CURRENT ZIP`,`INST AID AMT`,`NET REVENUE`),
+  snap_f22 %>% 
+    filter(`COHORT TERM` == "202209" & `COHORT CODE`=="NF") %>% 
+    select(`COHORT TERM`,ID,GENDER,`REPORT ETHNICITY`,RELIGION,CITIZENSHIP,`COMMUTER DORM`,`TERM CREDIT HRS`,`TRANSFER HRS`,GPA,`COLLEGE CODE`,`MAJOR CODE 1`,`ATHLETIC CODE`,`HOME STATE`,`HOME ZIP`,`ATRIB USCH DESC`,`HOME COUNTRY`,`CURRENT STREET2`,`CURRENT ZIP`,`INST AID AMT`,`NET REVENUE`)
+)
+```
+
+Append a column that includes High School GPA
+```{r}
+snap_toddler <-hs_gpa %>% 
+  select(-`Transcript GPA`) %>% 
+  left_join(x=snap_baby,y=.,by=c(ID='Banner ID')) %>% 
+  rename(`HS GPA` =`Recalculated GPA`)
+```
+
+Find out who was retained and who was not.
+```{r}
+snap_master <- bind_rows(
+  snap_toddler %>% 
+    filter(`COHORT TERM`=="202009") %>% 
+    mutate(ret_spring = (ID %in% snap_s21$ID )) %>% 
+    mutate(ret_fall = (ID %in% snap_f21$ID )),  
+  snap_toddler %>% 
+    filter(`COHORT TERM`=="202109") %>% 
+    mutate(ret_spring = (ID %in% snap_s22$ID)) %>% 
+    mutate(ret_fall = (ID %in% snap_f22$ID)) , 
+  snap_toddler %>% 
+    filter(`COHORT TERM`=="202209") %>% 
+    mutate(ret_spring = (ID %in% snap_s23$ID)) %>% 
+    mutate(ret_fall = (ID %in% snap_f23$ID)))  
+
+```
+
+GRAPHS
+```{r}
+snap_master %>%
+  ggplot(aes(x = `REPORT ETHNICITY`, fill = `REPORT ETHNICITY`)) +
+  geom_bar() +
+  labs(title = "Distribution by REPORT ETHNICITY  and Gender",
+       x = "REPORT ETHNICITY",
+       y = "Count") +
+  geom_text(
+    aes(label = ..count.., y = ..count..),
+    stat = "count",
+    vjust = -0.5,
+    size = 3,
+    position = position_stack(vjust = 0.5)
+  ) +
+  facet_wrap(~ GENDER) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 0.5, size = 6))
+
+
+snap_master %>% 
+  ggplot(aes(x = ret_fall, fill = GENDER)) +
+  geom_bar() +
+  labs(title = "Rentention in fall based on Gender",
+       x = "ret_fall",
+       y = "Count") +
+  facet_wrap(~ GENDER) +
+  geom_text(
+    aes(label = ..count.., y = ..count..),
+    stat = "count",
+    vjust = -0.5,
+    size = 4,
+    position = position_stack(vjust = 0.5)
+  ) +
+  scale_fill_manual(values = c("M" = "lightblue", "F" = "pink")) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 0.5, size = 6))
+
+snap_master %>%
+  count(ret_fall, GENDER) %>%
+  group_by(ret_fall) %>%
+  mutate(proportion = n / sum(n)) %>%
+  ggplot(aes(x = ret_fall, y = proportion, fill = GENDER)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Retention in fall based on Gender",
+       x = "ret_fall",
+       y = "Proportion") +
+  facet_wrap(~ GENDER) +
+  geom_text(
+    aes(label = scales::percent(proportion), y = proportion),
+    vjust = -0.5,
+    size = 4,
+    position = position_stack(vjust = 0.5)
+  ) +
+  scale_fill_manual(values = c("M" = "lightblue", "F" = "pink")) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 0.5, size = 6))
+
+
+snap_master %>%
+  count(`HOME STATE`, ret_fall) %>%
+  group_by(`HOME STATE`) %>%
+  mutate(proportion = n / sum(n)) %>%
+  ggplot(aes(x = `HOME STATE`, y = proportion, fill = as.factor(ret_fall))) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = scales::percent(proportion), y = proportion),
+            vjust = -0.5, size = 3, position = position_dodge(width = 0.9)) +
+  labs(title ='Proportion of Retention in Fall by Home State',
+       x = "HOME STATE",
+       y = "Proportion") +
+  scale_fill_manual(values = c("TRUE" = "green", "FALSE" = "red")) +
+  facet_wrap(~ as.factor(ret_fall)) +
+  theme(axis.text.x = element_text(angle = 50, hjust = 1, size = ))
+
+snap_master %>%
+  count(`REPORT ETHNICITY`, ret_fall) %>%
+  group_by(`REPORT ETHNICITY`) %>%
+  mutate(proportion = n / sum(n)) %>%
+  ggplot(aes(x = `REPORT ETHNICITY`, y = proportion, fill = as.factor(ret_fall))) +
+  geom_bar(stat = "identity") +
+  labs(title = "Retention in Fall based on Ethnicity",
+       x = "REPORT ETHNICITY",
+       y = "Proportion") +
+  facet_wrap(~ ret_fall) +
+  geom_text(aes(label = scales::percent(proportion), y = proportion),
+            vjust = -0.5, size = 4, position = position_stack(vjust = 0.5)) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust = 0.5, size = 6)) +
+  scale_fill_manual(values = c("TRUE" = "lightblue", "FALSE" = "pink"))
+
+
+
+```
+
+
+
+
+
+

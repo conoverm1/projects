@@ -1,0 +1,193 @@
+---
+title: "Big DF"
+author: "Matt Conocer"
+date: "`r Sys.Date()`"
+output: html_document
+---
+```{r setup, message=FALSE,warning=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+library(tidyverse)
+library(sf)
+library(readxl)
+library(RColorBrewer)
+library(tidycensus)
+
+census_api_key("fa67b1dbacf4fbbb1b14c875f34437c6cbdaa694")
+dhc.vars <- load_variables(2020, "dhc", cache = TRUE)
+acs5.vars <- load_variables(2021, "acs5")
+subject <- load_variables(2021, "acs5/subject")
+
+map2021 <- st_zm(st_read("PRECINCT2021_0311.shp"))
+
+results2021 <- read_excel("G21_Official_Canvass.xlsx", 
+    sheet = "Cincinnati", skip = 2)
+
+
+mapANDresults2021 <-
+  left_join(map2021, results2021, by = c("NAME" = "PRECINCT"))
+
+```
+
+\newpage
+
+Let's grab some census data and the maps associated.
+1. Something detailed from the ACS at the "block group" level.
+2. Straight population numbers at the "block" level.
+
+```{r}
+
+blockgroups.white <- get_acs(geography = "block group", 
+                             state = "Ohio",
+                             county = "Hamilton",
+                             variables = "B02001_002", 
+                             year = 2020,
+                             geometry = TRUE
+) %>% 
+  select(white.pop = estimate)
+
+
+blockgroups.total <- get_acs(geography = "block group", 
+                             state = "Ohio",
+                             county = "Hamilton",
+                             variables = "B02001_001", 
+                             year = 2020,
+                             geometry = TRUE
+) %>% 
+  select(total.pop = estimate)
+
+blockgroups.black <- get_acs(geography = "block group", 
+                             state = "Ohio",
+                             county = "Hamilton",
+                             variables = "B02001_003", 
+                             year = 2020,
+                             geometry = TRUE
+) %>% 
+  select(black.pop = estimate)
+
+blockgroups.hispanic  <- get_acs(geography = "tract", 
+                             state = "Ohio",
+                             county = "Hamilton",
+                             variables = "B03001_001", 
+                             year = 2020,
+                             geometry = TRUE
+) %>% 
+  select(hispanic.pop = estimate)
+
+block.total <- get_decennial(geography = "block", 
+                 state = "Ohio",
+                 county = "Hamilton",
+                 variables = "P1_001N", 
+                 year = 2020,
+                 sumfile = "dhc",
+                 geometry = TRUE) %>% 
+  select(total.pop = value)
+
+blockgroups.household <- get_acs(geography = "block group", 
+                             state = "Ohio",
+                             county = "Hamilton",
+                             variables = "B25010_001", 
+                             year = 2020,
+                             geometry = TRUE
+) %>% 
+  select(mean.size = estimate)
+
+blockgroups.income <- get_acs(geography = "block group", 
+                             state = "Ohio",
+                             county = "Hamilton",
+                             variables = "B19013_001", 
+                             year = 2020,
+                             geometry = TRUE
+) %>% 
+  select(med.income = estimate)
+
+blockgroups.income <- st_make_valid(blockgroups.income)
+blockgroups.household <- st_make_valid(blockgroups.household)
+blockgroups.total <- st_make_valid(blockgroups.total)
+mapANDresults2021 <- st_make_valid(mapANDresults2021)
+block.total <- st_make_valid(block.total)
+blockgroups.white <- st_make_valid(blockgroups.white)
+blockgroups.black <- st_make_valid(blockgroups.black)
+blockgroups.hispanic <- st_make_valid(blockgroups.hispanic)
+
+totalpopdf <- interpolate_pw(blockgroups.total, mapANDresults2021, to_id = "NAME", extensive = TRUE, weights = block.total, weight_column = "total.pop")
+whitepopdf <- interpolate_pw(blockgroups.white, mapANDresults2021, to_id = "NAME", extensive = TRUE, weights = block.total, weight_column = "total.pop")
+blackpopdf <- interpolate_pw(blockgroups.black, mapANDresults2021, to_id = "NAME", extensive = TRUE, weights = block.total, weight_column = "total.pop")
+hispanicpopdf <- interpolate_pw(blockgroups.hispanic, mapANDresults2021, to_id = "NAME", extensive = TRUE, weights = block.total, weight_column = "total.pop")
+meanhousesizedf <- interpolate_pw(blockgroups.household, mapANDresults2021, to_id = "NAME", extensive = FALSE, weights = block.total, weight_column = "total.pop")
+meanhouseincomedf <- interpolate_pw(blockgroups.income, mapANDresults2021, to_id = "NAME", extensive = FALSE, weights = block.total, weight_column = "total.pop")
+
+
+
+combined <- 
+  left_join(mapANDresults2021,
+                     st_drop_geometry(totalpopdf),
+                     by = c("NAME"= "NAME")) %>% 
+  left_join(.,
+                     st_drop_geometry(whitepopdf),
+                     by = c("NAME"= "NAME")) %>% 
+  left_join(.,
+                     st_drop_geometry(blackpopdf),
+                     by = c("NAME"= "NAME")) %>% 
+  left_join(.,
+                     st_drop_geometry(meanhousesizedf),
+                     by = c("NAME"= "NAME")) %>% 
+  left_join(.,
+                     st_drop_geometry(meanhouseincomedf),
+                     by = c("NAME"= "NAME"))
+
+options(scipen = 999)
+options(digits = 4)
+
+combined <- combined %>% 
+  mutate(notwhite.pop = total.pop - white.pop) %>% 
+  mutate(other.pop = notwhite.pop - black.pop) %>% 
+  mutate(area = st_area(geometry) / 2589988.11) %>% 
+  mutate(density = total.pop / area)
+
+```
+
+Check your data.  Make sure it's all there and as expected.
+
+\newpage
+
+Now let's put these data/maps together into one object.
+
+```{r}
+
+blockgroups.total <- st_make_valid(blockgroups.total)
+mapANDresults2021 <- st_make_valid(mapANDresults2021)
+block.total <- st_make_valid(block.total)
+blockgroups.white <- st_make_valid(blockgroups.white)
+blockgroups.black <- st_make_valid(blockgroups.black)
+blockgroups.hispanic <- st_make_valid(blockgroups.hispanic)
+
+totalpopdf <- interpolate_pw(blockgroups.total, mapANDresults2021, to_id = "NAME", extensive = TRUE, weights = block.total, weight_column = "total.pop")
+whitepopdf <- interpolate_pw(blockgroups.white, mapANDresults2021, to_id = "NAME", extensive = TRUE, weights = block.total, weight_column = "total.pop")
+blackpopdf <- interpolate_pw(blockgroups.black, mapANDresults2021, to_id = "NAME", extensive = TRUE, weights = block.total, weight_column = "total.pop")
+hispanicpopdf <- interpolate_pw(blockgroups.hispanic, mapANDresults2021, to_id = "NAME", extensive = TRUE, weights = block.total, weight_column = "total.pop")
+
+combined <- 
+  left_join(mapANDresults2021,
+                     st_drop_geometry(totalpopdf),
+                     by = c("NAME"= "NAME")) %>% 
+  left_join(.,
+                     st_drop_geometry(whitepopdf),
+                     by = c("NAME"= "NAME")) %>% 
+  left_join(.,
+                     st_drop_geometry(blackpopdf),
+                     by = c("NAME"= "NAME"))
+
+options(scipen = 999)
+options(digits = 4)
+
+combined <- combined %>% 
+  mutate(notwhite.pop = total.pop - white.pop) %>% 
+  mutate(other.pop = notwhite.pop - black.pop) %>% 
+  mutate(area = st_area(geometry) / 2589988.11) %>% 
+  mutate(density = total.pop / area)
+
+```
